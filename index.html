@@ -87,6 +87,8 @@
   .tag{display:inline-flex;align-items:center;gap:6px;background:rgba(30,28,20,.055);border-radius:4px;padding:4px 9px;font:500 12.5px 'IBM Plex Sans'}
   .tag svg{width:13px;height:13px;color:var(--seam)}
   .tag.brick-tag svg{color:var(--brick)}
+  .tag.fmt-tag{background:rgba(30,28,20,.085);font-weight:600}
+  .tag.fmt-tag svg{color:var(--ink)}
   .tag .tq{font:700 12px 'IBM Plex Mono',monospace;color:#6E6A60}
   .o-spec{margin-top:7px;font:500 12px 'IBM Plex Mono',monospace;color:var(--soft)}
   .prow{display:grid;grid-template-columns:56px 1fr 64px 62px;gap:10px;align-items:center}
@@ -224,6 +226,15 @@
   .thick-seg button{flex:1;padding:10px 0;border:1.5px solid #D3CEC0;background:#fff;border-radius:6px;font:600 14px 'IBM Plex Mono',monospace;cursor:pointer;color:#57534A;transition:all .12s}
   .thick-seg button:hover{border-color:#9C9788}
   .thick-seg button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+  /* ─── Формат панели ─── */
+  .format-seg{display:flex;gap:8px}
+  .format-seg button{flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;padding:13px 6px 11px;border:1.5px solid #D3CEC0;background:#fff;border-radius:8px;cursor:pointer;transition:all .12s;font:600 13.5px 'IBM Plex Sans';color:#57534A}
+  .format-seg button svg{width:20px;height:20px}
+  .format-seg button:hover{border-color:#9C9788}
+  .format-seg button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .format-seg button.on svg{color:#fff}
+
   .m-submit{margin-top:24px;width:100%}
 
   /* ─── Элементы (фасадный декор) ─── */
@@ -385,6 +396,11 @@ const KEY = 'smena_v2';
 const HOUR = 36e5;
 const ST_LABEL = { new:'Новый', production:'На производстве', ready:'Готова к отгрузке' };
 const SEC_LABEL = { thermo:'Термопанели', decor:'Фасадный декор' };
+const FORMAT_META = {
+  brick: { label:'Кирпич', icon:'brick-wall' },
+  rigel: { label:'Ригель', icon:'align-justify' },
+  block: { label:'Блок',   icon:'box' }
+};
 const bc = ('BroadcastChannel' in window) ? new BroadcastChannel('smena_sync') : null;
 
 const pad = n => String(n).padStart(2,'0');
@@ -402,10 +418,11 @@ const plural = (n, one, few, many) => { const m10 = n % 10, m100 = n % 100;
 function load(){ try{ const r = localStorage.getItem(KEY); return r ? JSON.parse(r) : null; }catch(e){ return null; } }
 let state = load() || { orders: [], history: [] };
 
-/* миграция: у элементов декора появляется личный счётчик выполненного */
+/* миграция: формат для старых заявок термопанелей + счётчики для элементов декора */
 (function migrate(){
   let changed = false;
   state.orders.forEach(o => {
+    if(o.section === 'thermo' && !o.format){ o.format = 'brick'; changed = true; }
     if(o.section === 'decor'){
       if(!Array.isArray(o.elements)){ o.elements = [{ name:'Элемент', qty:o.qty||0, done:0 }]; changed = true; }
       o.elements.forEach(e => { if(typeof e.done !== 'number'){ e.done = 0; changed = true; } });
@@ -421,6 +438,7 @@ window.addEventListener('storage', e => { if(e.key === KEY){ state = load() || s
 const icons = () => { try{ lucide.createIcons(); }catch(e){} };
 const byId = id => state.orders.find(o => o.id === id);
 const isDecor = o => o.section === 'decor';
+const fmtMeta = o => FORMAT_META[o.format] || FORMAT_META.brick;
 const orderAllDone = o => isDecor(o)
   ? o.elements.every(e => e.done >= e.qty)
   : (o.doneSeam >= o.qty && o.doneBrick >= o.qty);
@@ -522,7 +540,9 @@ function orderMiddleHTML(o){
     return `<div class="o-colors">${tags}</div>
       <div class="o-spec">${o.qty} ${plural(o.qty, 'элемент', 'элемента', 'элементов')} · ${kinds}</div>`;
   }
+  const fm = fmtMeta(o);
   return `<div class="o-colors">
+      <span class="tag fmt-tag"><i data-lucide="${fm.icon}"></i>${fm.label}</span>
       <span class="tag"><i data-lucide="paint-roller"></i>${esc(o.seam)}</span>
       <span class="tag brick-tag"><i data-lucide="brick-wall"></i>${esc(o.brick)}</span>
     </div>
@@ -616,7 +636,9 @@ function specRowsHTML(o){
       `<div class="spec-row"><span>Элемент · ${esc(e.name)}</span><b class="mono">${e.qty} шт</b></div>`).join('') +
       `<div class="spec-row"><span>Позиций / элементов (итого)</span><b class="mono">${o.elements.length} / ${o.qty}</b></div>`;
   }
+  const fm = fmtMeta(o);
   return `
+    <div class="spec-row"><span>Формат панели</span><b><span style="display:inline-flex;align-items:center;gap:7px"><i data-lucide="${fm.icon}" style="width:14px;height:14px"></i>${fm.label}</span></b></div>
     <div class="spec-row"><span>Цвет / состав шва</span><b>${esc(o.seam)}</b></div>
     <div class="spec-row"><span>Цвет кирпича</span><b>${esc(o.brick)}</b></div>
     <div class="spec-row"><span>Толщина</span><b class="mono">${o.thickness} см</b></div>
@@ -853,7 +875,7 @@ function deleteOrder(id){
   if(o.status !== 'new'){ toast('Удалять можно только заявки со статусом «Новый»', 'info'); return; }
   const unit = isDecor(o)
     ? `${o.qty} ${plural(o.qty, 'элемент', 'элемента', 'элементов')}`
-    : `${o.qty} ${plural(o.qty, 'лист', 'листа', 'листов')}`;
+    : `формат «${fmtMeta(o).label}», ${o.qty} ${plural(o.qty, 'лист', 'листа', 'листов')}`;
   openConfirm(
     `Удалить заявку № ${esc(o.number)}?`,
     `Заявка <b>№ ${esc(o.number)}</b> (${SEC_LABEL[o.section]}, ${unit}) будет удалена из раздела, и сотрудники цеха перестанут её видеть.`,
@@ -889,12 +911,11 @@ function deleteHistoryEntry(hid){
               : o.elements.find(x => x.name === it.name);
             if(el) el.done = Math.max(0, el.done - it.done);
           });
-          if(o.status === 'ready' && !orderAllDone(o)) o.status = 'production';
         } else {
           o.doneSeam = Math.max(0, o.doneSeam - h.seamDone);
           o.doneBrick = Math.max(0, o.doneBrick - h.brickDone);
-          if(o.status === 'ready' && !orderAllDone(o)) o.status = 'production';
         }
+        if(o.status === 'ready' && !orderAllDone(o)) o.status = 'production';
       }
       state.history = state.history.filter(x => x.id !== hid);
       persist(); closeModal();
@@ -955,24 +976,32 @@ function openCreateModal(section){
       </div>`;
 
   const thermoFields = `
+      <div class="field">
+        <label><span class="fnum">03</span>Формат панели</label>
+        <div class="format-seg" id="formatSeg">
+          <button type="button" data-f="brick" class="on"><i data-lucide="brick-wall"></i>Кирпич</button>
+          <button type="button" data-f="rigel"><i data-lucide="align-justify"></i>Ригель</button>
+          <button type="button" data-f="block"><i data-lucide="box"></i>Блок</button>
+        </div>
+      </div>
       <div class="frow">
         <div class="field">
-          <label><span class="fnum">03</span>Цвет / состав шва</label>
+          <label><span class="fnum">04</span>Цвет / состав шва</label>
           <input name="seam" placeholder="напр. Серый мрамор КМ-12">
         </div>
         <div class="field">
-          <label><span class="fnum">04</span>Цвет кирпича</label>
+          <label><span class="fnum">05</span>Цвет кирпича</label>
           <input name="brick" placeholder="напр. Терракота">
         </div>
       </div>
       <div class="field">
-        <label><span class="fnum">05</span>Толщина панели, см</label>
+        <label><span class="fnum">06</span>Толщина панели, см</label>
         <div class="thick-seg" id="thickSeg">
           ${[3,4,5,6,7,8,9,10].map(t => `<button type="button" data-t="${t}" ${t===5?'class="on"':''}>${t}</button>`).join('')}
         </div>
       </div>
       <div class="field">
-        <label><span class="fnum">06</span>Количество листов (панелей)</label>
+        <label><span class="fnum">07</span>Количество листов (панелей)</label>
         <input name="qty" class="big-mono" inputmode="numeric" placeholder="500">
         <div class="hint"><i data-lucide="info"></i><span>Этапы рассчитаются автоматически: при 500 панелях цеху нужно нанести <b>500 раз шов</b> и <b>500 раз кирпич</b> — отдельно это указывать не нужно.</span></div>
       </div>`;
@@ -1001,6 +1030,11 @@ function openCreateModal(section){
   else {
     const qtyIn = modalBox.querySelector('[name="qty"]');
     qtyIn.addEventListener('input', () => { qtyIn.value = qtyIn.value.replace(/\D+/g,''); });
+    modalBox.querySelector('#formatSeg').addEventListener('click', e => {
+      const b = e.target.closest('button'); if(!b) return;
+      modalBox.querySelectorAll('#formatSeg button').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+    });
     modalBox.querySelector('#thickSeg').addEventListener('click', e => {
       const b = e.target.closest('button'); if(!b) return;
       modalBox.querySelectorAll('#thickSeg button').forEach(x => x.classList.remove('on'));
@@ -1042,7 +1076,12 @@ function openCreateModal(section){
       const seam = f.seam.value.trim(), brick = f.brick.value.trim();
       const qty = parseInt(f.qty.value, 10);
       if(!seam || !brick || !qty || qty < 1) return;
-      payload = { seam, brick, thickness: +modalBox.querySelector('#thickSeg .on').dataset.t, qty };
+      payload = {
+        format: modalBox.querySelector('#formatSeg .on').dataset.f,
+        seam, brick,
+        thickness: +modalBox.querySelector('#thickSeg .on').dataset.t,
+        qty
+      };
     }
 
     const o = {
@@ -1185,9 +1224,10 @@ function openMarkModal(id){
   const o = byId(id); if(!o) return;
   if(isDecor(o)) return openMarkModalDecor(o);
   const remS = o.qty - o.doneSeam, remB = o.qty - o.doneBrick;
+  const fm = fmtMeta(o);
   const seamColor = `<span class="mk-color">${esc(o.seam)}</span>`;
   const brickColor = `<span class="mk-color">${esc(o.brick)}</span>`;
-  modalBox.innerHTML = mHead(`Отметка выполнения · ${SEC_LABEL[o.section]}`, `Заказ № ${esc(o.number)}`) + `
+  modalBox.innerHTML = mHead(`Отметка выполнения · ${SEC_LABEL[o.section]}`, `Заказ № ${esc(o.number)} · ${fm.label}`) + `
     <form id="markForm" novalidate>
       <div class="mk-stage">
         <div class="mk-head">
